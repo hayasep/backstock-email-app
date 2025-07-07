@@ -1,5 +1,12 @@
 from flask import Flask, request, render_template_string
-import re
+from openai import OpenAI
+from dotenv import load_dotenv
+from datetime import datetime
+import os
+
+# Load API key from .env file
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = Flask(__name__)
 
@@ -7,7 +14,7 @@ HTML_TEMPLATE = """
 <!doctype html>
 <html>
 <head>
-    <title>Backstock Email Generator</title>
+    <title>Backstock Email Generator (AI)</title>
     <style>
         body { font-family: Arial; margin: 20px; }
         textarea { width: 100%; height: 200px; }
@@ -18,7 +25,7 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h2>Backstock Email Generator</h2>
+    <h2>Backstock Email Generator (AI)</h2>
     <form method="post">
         <textarea name="raw_text" placeholder="Paste your backstock/push message here">{{ raw_text }}</textarea>
         <br>
@@ -35,29 +42,27 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def parse_text_to_table(raw_text):
-    sections = re.split(r'\n\s*\n', raw_text.strip())
-    rows = []
+def parse_text_to_table_ai(raw_text):
+    prompt = f"""
+You are a helpful assistant. Convert the following text into an HTML table with three columns: Category, Section, and Leftover.
 
-    for section in sections:
-        lines = section.strip().split('\n')
-        if not lines: continue
-        category = lines[0].strip(':')
-        for line in lines[1:]:
-            if ' - ' in line:
-                section_name, leftover = map(str.strip, line.split(' - ', 1))
-                rows.append((category, section_name, leftover))
+- The input is a list of leftover stock and push items, categorized by location (like 'upstairs backstock', 'downstairs push', etc.).
+- Each item line includes a section name and leftover type/count (like 'hba 5 carts' or 'CD 1 furniture pallet').
+- Use the last section header as the 'Category' for the following lines.
+- Format the result in clean HTML using <table>, <tr>, and <td>.
 
-    if not rows:
-        return ""
-
-    table = '<table><tr><th>Category</th><th>Section</th><th>Leftover</th></tr>'
-    for cat, sec, left in rows:
-        table += f'<tr><td>{cat}</td><td>{sec}</td><td>{left}</td></tr>'
-    table += '</table>'
-    return table
-
-from datetime import datetime
+Text:
+{raw_text}
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"<p style='color:red;'>Error generating table: {e}</p>"
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -65,7 +70,7 @@ def index():
     raw_text = ""
     if request.method == 'POST':
         raw_text = request.form.get('raw_text', '')
-        table_html = parse_text_to_table(raw_text)
+        table_html = parse_text_to_table_ai(raw_text)
     date = datetime.now().strftime('%b %d, %Y')
     return render_template_string(HTML_TEMPLATE, table_html=table_html, raw_text=raw_text, date=date)
 
